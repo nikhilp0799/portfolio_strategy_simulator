@@ -1,6 +1,8 @@
 import pandas as pd
+from datetime import datetime
+import pytz
 
-def execution_agent(prices, signals, initial_capital=100000, position_size_pct=0.1):
+def execution_agent(prices, signals, ticker, initial_capital=100000, position_size_pct=0.1):
     """
     Executes trades based on signals with capital and position tracking.
 
@@ -33,11 +35,13 @@ def execution_agent(prices, signals, initial_capital=100000, position_size_pct=0
                 cost = size * price
                 cash -= cost
                 trade_log.append({
-                    "date": date,
+                    "date": date.isoformat(),
+                    "ticker": ticker,
                     "type": "BUY",
                     "price": price,
                     "shares": size,
-                    "cash": cash
+                    "cash": cash,
+                    "portfolio_value": cash + holdings * price
                 })
 
         # Sell Signal
@@ -45,11 +49,13 @@ def execution_agent(prices, signals, initial_capital=100000, position_size_pct=0
             revenue = holdings * price
             cash += revenue
             trade_log.append({
-                "date": date,
+                "date": date.isoformat(),
+                "ticker": ticker,
                 "type": "SELL",
                 "price": price,
                 "shares": holdings,
-                "cash": cash
+                "cash": cash,
+                "portfolio_value": cash + holdings * price
             })
             holdings = 0
 
