@@ -5,89 +5,70 @@ from feature_engineering import add_rolling_features
 from model_forecasting import train_model, predict_model
 from signal_generator import generate_signals
 from backtester import backtest_strategy
-from visualization_utils import generate_signal_overlay
-from visualization_utils import plot_price_signals
 from execution_agent import execution_agent
-from visualization_utils import plot_equity_curve
-from visualization_utils import plot_actual_vs_predicted
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from visualization_utils import (
+    generate_signal_overlay,
+    plot_price_signals,
+    plot_equity_curve,
+    plot_actual_vs_predicted,
+)
 
-# 1. Load data
+# 1) Data
 ticker = "CMCSA"
-df = load_stock_data(ticker, "2022-01-01", "2024-01-01")
+prices = load_stock_data(ticker, "2022-01-01", "2024-01-01")
+# prices has one column named "CMCSA"
+close = prices[ticker].rename("Close")
+df = close.to_frame()  # now df has a 'Close' column like before
 
-# Ensure 'Close' is a Series
-price_series = df['Close']
 
-# 2. Feature engineering
+# 2) Features
 df = add_rolling_features(df)
 
-# 3. Forecast
-# Time-based train/test split
+# 3) Split
 split_index = int(len(df) * 0.8)
-X = df.drop(columns=['Close'])
-y = df['Close']
-
+X = df.drop(columns=["Close"])
+y = df["Close"]
 X_train, X_test = X[:split_index], X[split_index:]
 y_train, y_test = y[:split_index], y[split_index:]
 
-# Train on training data only
-model = train_model(X_train, y_train, model_type='lstm')
+# 4) Train (swap 'lstm' <-> 'rf' <-> 'xgb' freely)
+model = train_model(X_train, y_train, model_type="lstm")
 
-# Predict on test data
-pred_series = predict_model(model, X_test)  # Already aligned
+# 5) Predict (returns a pd.Series with the correct index for the chosen model)
+pred_series = predict_model(model, X_test)  # <- DO NOT slice this
 
-# Evaluate and visualize
-actual_trimmed = y_test.reindex(pred_series.index)
+# 6) Align actuals to predictions (one line, no lookback hacks)
+actual_aligned = y_test.reindex(pred_series.index)
+
+# 7) Plot actual vs predicted (metrics inside the plot)
 plot_actual_vs_predicted(
-    actual_prices=actual_trimmed,
+    actual_prices=actual_aligned,
     predicted_prices=pred_series,
     dates=pred_series.index,
-    save_path="actual_vs_predicted.png"
+    save_path="actual_vs_predicted.png",
 )
 
-
-
-
-# Debug prediction diffs
-diffs = pd.Series(pred_series).diff().dropna()
-print("📈 Prediction Differences Summary:")
-print(diffs.describe())
-
-# 4. Generate signals — ensure prediction index matches price
-lookback = 5
-pred_series = pred_series[lookback:]
-
-# Get correct index from original test set (not y_test, as it’s trimmed)
-aligned_index = X_test.index[lookback : lookback + len(pred_series)]
-
-# Ensure alignment
-pred_series.index = aligned_index
-
-
+# 8) Signals (works on the pred_series index for any model)
 signals = generate_signals(pred_series, threshold=0.005)
-
-
 print("📍 Unique Signals:", signals.value_counts())
 
-# 5. Backtest
-performance = backtest_strategy(price_series, signals)
+# 9) Backtest on the aligned test prices only
+prices_for_bt = actual_aligned  # y_test trimmed to pred index
+performance = backtest_strategy(prices_for_bt, signals)
 print("🔁 Backtest Performance:", {
-    k: v if not isinstance(v, pd.Series) else v.tail(3).to_dict()  # show tail of long Series
+    k: v if not isinstance(v, pd.Series) else v.tail(3).to_dict()
     for k, v in performance.items()
 })
 
-# 6. Overlay for visualization
-overlay = generate_signal_overlay(df['Close'], signals)
+# 10) Visuals on the same aligned window
+overlay = generate_signal_overlay(prices_for_bt, signals)
 print("📊 Sample Overlay Data:", {k: overlay[k][:3] for k in overlay})
 
-plot_price_signals(y_test, signals)
+plot_price_signals(prices_for_bt, signals)
 
-
-equity_curve, trade_log = execution_agent(df['Close'], signals, ticker)
+# 11) Execution agent runs on the same aligned prices/signals
+equity_curve, trade_log = execution_agent(prices_for_bt, signals, ticker)
 plot_equity_curve(equity_curve)
-
 print("📒 First 3 Trades:", trade_log[:3])
-
 
 sys.exit()
